@@ -71,6 +71,7 @@ class _Coordinate(object):
         n_values: int,
         dtype: type | np.dtype = float,
         label: str = "",
+        values: arr = []
     ) -> None:
         self.name = name
         self.dtype = dtype
@@ -89,8 +90,11 @@ class _Coordinate(object):
                 f"Coordinate datatype ({self.dtype}) and max-value datatype ({type(self.max)}) don't match."
             )
         self._n_values = n_values
-        self._values = np.linspace(self.min, self.max, self._n_values, self.dtype)
-
+        if values == []:
+            self._values = np.linspace(self.min, self.max, self._n_values, self.dtype)
+        else:
+            self._values = values
+            
     def get(self):
         return self._values
 
