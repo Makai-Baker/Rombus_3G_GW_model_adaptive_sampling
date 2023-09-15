@@ -1,8 +1,12 @@
 import numpy as np
 
+import scipy as sp
+
 from typing import Self
 
 from scipy.linalg.lapack import get_lapack_funcs  # type: ignore
+
+from rombus.params import solar_mass, gravitational_constant, speed_of_light
 
 import rombus._core.hdf5 as hdf5
 
@@ -284,15 +288,35 @@ class EmpiricalInterpolant(object):
         )
         eim.make(reduced_basis.matrix)
 
-        domain = reduced_basis.model.domain
-        self.nodes = domain[eim.indices]
+        if reduced_basis.model.coordinate.resample:
+            f = reduced_basis.model.coordinate
+            Mc_min = reduced_basis.model.model_params['Mc'].min          
+            
+            T = (5/256)*(Mc_min*solar_mass)**(-5/3) * \
+        (np.pi*f.min)**(-8/3)*speed_of_light**5 * gravitational_constant**(-5/3)
 
-        nodes_sorted, B_matrix_sorted = zip(
-            *sorted(zip(self.nodes, eim.B), key=lambda x: x[0])
-        )
-        self.nodes = np.asarray(nodes_sorted)
-        self.B_matrix = np.asarray(B_matrix_sorted)
+            self.nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
 
+            interp_B = sp.interpolate.CubicSplien(self.nodes, eim.B)
+
+            self.B_matrix = interp_B(self.nodes)
+
+            nodes_sorted, B_matrix_sorted = zip(
+                *sorted(zip(self.nodes, self.B_matrix), key=lambda x: x[0])
+            )
+            self.nodes = np.asarray(nodes_sorted)
+            self.B_matrix = np.asarray(B_matrix_sorted) 
+            
+        else:
+            domain = reduced_basis.model.domain
+            self.nodes = domain[eim.indices]
+    
+            nodes_sorted, B_matrix_sorted = zip(
+                *sorted(zip(self.nodes, eim.B), key=lambda x: x[0])
+            )
+            self.nodes = np.asarray(nodes_sorted)
+            self.B_matrix = np.asarray(B_matrix_sorted)   
+        
         return self
 
     @log.callable("Writing empirical interpolant")
