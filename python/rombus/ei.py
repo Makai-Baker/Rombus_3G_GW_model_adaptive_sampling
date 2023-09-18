@@ -313,15 +313,9 @@ class EmpiricalInterpolant(object):
         
         interp_B = sp.interpolate.CubicSpline(self.nodes, self.B_matrix)
         
-        self.nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
+        interp_nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
         
-        self.B_matrix = interp_B(self.nodes)
-
-        nodes_sorted, B_matrix_sorted = zip(
-            *sorted(zip(self.nodes, self.B_matrix), key=lambda x: x[0])
-        )
-        self.nodes = np.asarray(nodes_sorted)
-        self.B_matrix = np.asarray(B_matrix_sorted) 
+        self.B_matrix = interp_B(interp_nodes)
     
     @log.callable("Writing empirical interpolant")
     def write(self, h5file: hdf5.File) -> None:
