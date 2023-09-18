@@ -288,36 +288,41 @@ class EmpiricalInterpolant(object):
         )
         eim.make(reduced_basis.matrix)
 
+        domain = reduced_basis.model.domain
+        self.nodes = domain[eim.indices]
+
+        nodes_sorted, B_matrix_sorted = zip(
+            *sorted(zip(self.nodes, eim.B), key=lambda x: x[0])
+        )
+        self.nodes = np.asarray(nodes_sorted)
+        self.B_matrix = np.asarray(B_matrix_sorted)   
+
         if reduced_basis.model.coordinate.resample:
             f = reduced_basis.model.coordinate
-            Mc_min = reduced_basis.model.model_params['Mc'].min          
-            
-            T = time_to_freq(Mc_min, f.min)
-
-            interp_B = sp.interpolate.CubicSplien(self.nodes, eim.B)
-            
-            self.nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
-            
-            self.B_matrix = interp_B(self.nodes)
-
-            nodes_sorted, B_matrix_sorted = zip(
-                *sorted(zip(self.nodes, self.B_matrix), key=lambda x: x[0])
-            )
-            self.nodes = np.asarray(nodes_sorted)
-            self.B_matrix = np.asarray(B_matrix_sorted) 
-            
-        else:
-            domain = reduced_basis.model.domain
-            self.nodes = domain[eim.indices]
-    
-            nodes_sorted, B_matrix_sorted = zip(
-                *sorted(zip(self.nodes, eim.B), key=lambda x: x[0])
-            )
-            self.nodes = np.asarray(nodes_sorted)
-            self.B_matrix = np.asarray(B_matrix_sorted)   
+            Mc_min = reduced_basis.model.model_params['Mc'].min
+            self.resample_B(f.min, Mc_min)
         
         return self
 
+    @log.callable("Resampling the reduced basis")
+    def resample_B(self, minimum_frequency, chirp_mass):
+        """
+        Interpolates the B matrix onto a uniformly sampled domain.
+        """      
+        T = time_to_freq(chirp_mass, minimum_frequency)
+        
+        interp_B = sp.interpolate.CubicSpline(self.nodes, self.B_matrix)
+        
+        self.nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
+        
+        self.B_matrix = interp_B(self.nodes)
+
+        nodes_sorted, B_matrix_sorted = zip(
+            *sorted(zip(self.nodes, self.B_matrix), key=lambda x: x[0])
+        )
+        self.nodes = np.asarray(nodes_sorted)
+        self.B_matrix = np.asarray(B_matrix_sorted) 
+    
     @log.callable("Writing empirical interpolant")
     def write(self, h5file: hdf5.File) -> None:
         """Write empirical interpolant to an open HDF5 file
