@@ -6,7 +6,7 @@ from typing import Self
 
 from scipy.linalg.lapack import get_lapack_funcs  # type: ignore
 
-from rombus.params import solar_mass, gravitational_constant, speed_of_light
+from rombus.params import time_to_freq
 
 import rombus._core.hdf5 as hdf5
 
@@ -292,13 +292,12 @@ class EmpiricalInterpolant(object):
             f = reduced_basis.model.coordinate
             Mc_min = reduced_basis.model.model_params['Mc'].min          
             
-            T = (5/256)*(Mc_min*solar_mass)**(-5/3) * \
-        (np.pi*f.min)**(-8/3)*speed_of_light**5 * gravitational_constant**(-5/3)
-
-            self.nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
+            T = time_to_freq(Mc_min, f.min)
 
             interp_B = sp.interpolate.CubicSplien(self.nodes, eim.B)
-
+            
+            self.nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
+            
             self.B_matrix = interp_B(self.nodes)
 
             nodes_sorted, B_matrix_sorted = zip(
