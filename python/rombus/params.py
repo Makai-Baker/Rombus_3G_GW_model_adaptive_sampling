@@ -10,7 +10,7 @@ speed_of_light = 299792458.0  # m/s
 solar_mass = 1.988409870698050731911960804878414216e30  # Kg
 gravitational_constant = 6.6743e-11  # m^3 kg^-1 s^-2
 
-def time_to_freq(chirp_mass, frequency):
+def freq_to_time(chirp_mass, frequency):
     return (5/256)*(chirp_mass*solar_mass)**(-5/3) * \ 
     (np.pi*frequency)**(-8/3)*speed_of_light**5 * gravitational_constant**(-5/3)
 
