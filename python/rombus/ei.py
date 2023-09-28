@@ -1,12 +1,14 @@
 import numpy as np
 
+from mpi4py import MPI
+
 import scipy as sp
 
 from typing import Self
 
 from scipy.linalg.lapack import get_lapack_funcs  # type: ignore
 
-from rombus.params import time_to_freq
+from rombus.params import freq_to_time
 
 import rombus._core.hdf5 as hdf5
 
@@ -309,13 +311,73 @@ class EmpiricalInterpolant(object):
         """
         Interpolates the B matrix onto a uniformly sampled domain.
         """      
-        T = time_to_freq(chirp_mass, minimum_frequency)
+        T = freq_to_time(chirp_mass, minimum_frequency)
+
+        # Setup MPI information
+        comm = MPI.COMM_WORLD
+        size = comm.Get_size()
+        rank = comm.Get_rank()
+
+        # Setup partitions
+        n,m = self.B_matrix.shape
+
+        columns_per_process = m // size
+        remainder_columns = m % size
+
+        start_column = rank * columns_per_process + min(rank, remainder_columns)
+        end_column = (rank + 1) * columns_per_process + min(rank + 1, remainder_columns)
         
-        interp_B = sp.interpolate.CubicSpline(self.nodes, self.B_matrix)
+        num_cols = end_column - start_column
         
-        interp_nodes = np.linspace(f.min, f.max, (f.max-f.min)*T)
+        send_data=None
+
+        # Initialize data
+        if rank == 0:
+            data = self.B_matrix
+
+            # Transform data to 1D column-wise array to Scatter
+            arrs = np.array_split(data, size, axis=1)
+            raveled = [np.ravel(arr) for arr in arrs]
+            send_data = np.concatenate(raveled)
+
+            # Keep track of number of items in each proc
+            sendcounts = [len(arr.flatten()) for arr in arrs]
+            displacements = np.append(0,np.cumsum(sendcounts)[:-1])
+            counts = comm.bcast(sendcounts, root=0)
         
-        self.B_matrix = interp_B(interp_nodes)
+        else:
+            sendcounts=None
+            displacements=None
+
+        # Scatter data
+        recvbuf = np.empty((n, num_cols), dtype='float64')
+        comm.Scatterv([send_data, sendcounts, displacements, MPI.DOUBLE], recvbuf, root=0)
+ 
+        # Interpolate
+        data_transposed = recvbuf.T
+
+        x_values = np.linspace(f.min, f.max, (f.min-f.max)*T)
+        
+        interpolated = np.empty((len(x_values), num_cols))
+        
+        for i, row in enumerate(data_transposed):
+            spline = sp.interpolate.CubicSpline(f.values, row)
+            interpolated[:, i] = spline(x_values).ravel()
+            comm.Barrier()
+
+        # Gather data back to root process
+        if len(data_transposed.flatten()) < max(counts):
+            interpolated = np.insert(empty, -1, np.nan, axis=1)
+        
+        sendvbuf = np.empty((size*interpolated.shape[0], interpolated.shape[1]), dtype='float64')
+        comm.Gatherv(interpolated, sendvbuf, root=0)
+
+        # Reorganise data
+        if rank == 0:
+            arrs = [arr[:, ~np.isnan(arr).all(axis=0)] for arr in np.split(sendvbuf, size, axis=0)]
+            self.B_matrix = np.concatenate(arrs,axis=1)
+        
+        MPI.Finalize()
     
     @log.callable("Writing empirical interpolant")
     def write(self, h5file: hdf5.File) -> None:
