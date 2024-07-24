@@ -1,0 +1,32 @@
+-------------------------------------------------------------------------------
+There are messages associated with the following module(s):
+-------------------------------------------------------------------------------
+
+mamba:
+   - Mamba is a drop-in replacement for conda, offering higher speed and
+   more reliable environment solutions. - Do you really need conda/mamba??
+   Do you know about python virtual environments??? We HIGHLY recommend
+   using virtual envs instead. e.g. python -m venv my-environment - Remember
+   you can change where conda environemnts are created (if you run out of
+   space in your home directory) ``` $ conda config --env --prepend
+   envs_dirs /path/to/my/project/on/fred/.conda/envs $ conda config --env
+   --prepend pkgs_dirs /path/to/my/project/on/fred/.conda/pkgs ``` - To hide
+   this message in the future, load the module with -q ``` $ module -q load
+   conda ```
+
+-------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------
+WARNING: There was an error initializing an OpenFabrics device.
+
+  Local host:   dave10
+  Local device: mlx5_0
+--------------------------------------------------------------------------
+Building ROM...   Model:   rombus.models.PhenomP:Model   Samples: /fred/oz209/abaker/.conda/envs/rombus/src/rombus/python/rombus/models/PhenomP_samples.csv   Loading model from file...      Importing model...(rombus.models.PhenomP:Model)......         Adding parameter (m1)...Done.         Adding parameter (m2)...Done.         Adding parameter (chi1L)...Done.         Adding parameter (chi2L)...Done.         Adding parameter (chip)...Done.         Adding parameter (thetaJ)...Done.         Adding parameter (alpha)...Done.      Done. (1.0 seconds)   Done. (1.0 seconds)   Loading model from file...Done.   Building ROM...      Computing reduced basis...         Loading model from file...Done.         Generating training set...            
+Traceback (most recent call last):
+  File "/fred/oz209/abaker/.conda/envs/rombus/src/rombus/python/rombus/tests/test_PhenomP.py", line 53, in <module>
+    test_PhenomP('.')
+  File "/fred/oz209/abaker/.conda/envs/rombus/src/rombus/python/rombus/tests/test_PhenomP.py", line 33, in test_PhenomP
+    assert result.exit_code == 0
+           ^^^^^^^^^^^^^^^^^^^^^
+AssertionError
