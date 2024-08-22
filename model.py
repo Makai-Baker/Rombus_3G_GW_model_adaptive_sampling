@@ -147,7 +147,10 @@ class RombusModel(metaclass=_RombusModelABCMeta):
     params: Params
     """The parameters defined for this model"""
 
-    def __init__(self, model: str):
+    def __init__(self):
+        pass
+    
+    def perform_checks(self, model:str):
 
         # Keep track of the model string so we can reinstantiate from a saved state
         self.model_str = model
@@ -160,7 +163,7 @@ class RombusModel(metaclass=_RombusModelABCMeta):
         # Check that the domain has been suitably set
         assert self.n_domain > 0
 
-        # Check that at least one parameter has beed defined
+        # Check that at least one parameter has been defined
         if self.params.count <= 0:
             raise exceptions.RombusModelParamsError(
                 f"Invalid number of parameters ({self.params.count}) specified for Rombus model ({self})."
@@ -218,7 +221,7 @@ class RombusModel(metaclass=_RombusModelABCMeta):
 
     @classmethod
     @log.callable("Loading model from file")
-    def load(cls, model: str | Self) -> Self:
+    def load(cls, model: str | Self, *init_args) -> Self:
 
         """Ensure that a model has been imported for use by Rombus.
 
@@ -239,7 +242,9 @@ class RombusModel(metaclass=_RombusModelABCMeta):
             except exceptions.RombusException as e:
                 log.handle_exception(e)
             else:
-                return model_class(model)
+                rombus_model = model_class(*init_args)
+                rombus_model.perform_checks(model)
+                return rombus_model
         elif not isinstance(model, RombusModel):
             raise exceptions.RombusModelInitError(
                 "Invalid type ({type(model)}) specified when loading model {model}."
@@ -263,19 +268,25 @@ class RombusModel(metaclass=_RombusModelABCMeta):
             log.handle_exception(e)
 
     # Need to put Samples in quotes and check TYPE_CHECKING above to manage circular import with models.py
-    def generate_model_set(self, samples: "Samples") -> np.ndarray:
+    def generate_model_set(self, samples: "Samples", product, weights) -> np.ndarray:
         """Generate a set of models for a given set of parameter samples.
 
         Parameters
         ----------
         samples : "Samples"
             A set of Samples
+        product
+            The inner product to use for normalisation
+        weights
+            Integration weights to use in normalisation. Allows for noise-weighted inner product.
 
         Returns
         -------
         np.ndarray
             An array of model results: 1 for each given sample.
         """
+        #if product is None:
+        #    product = lambda w, x, y : np.vdot(x, y / w)
 
         my_ts: np.ndarray = np.zeros(
             shape=(samples.n_samples, self.n_domain), dtype=self.ordinate.dtype
@@ -284,7 +295,7 @@ class RombusModel(metaclass=_RombusModelABCMeta):
         with log.progress("Generating training set", samples.n_samples) as progress:
             for i, params_numpy in enumerate(samples.samples):
                 model_i = self.compute(self.params.np2param(params_numpy), self.domain)
-                my_ts[i] = model_i / np.sqrt(np.vdot(model_i, model_i).real)
+                my_ts[i] = model_i / np.sqrt(product(weights, model_i, model_i).real) #np.sqrt(np.vdot(model_i, model_i).real)
                 progress.update(i)
 
         return my_ts
@@ -466,5 +477,5 @@ def _import_from_string(import_str: str) -> Any:
         raise exceptions.RombusModelImportFromStringError(
             f'Attribute "{attrs_str}" not found in module "{module_str}".'
         )
-
+    
     return instance

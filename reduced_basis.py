@@ -1,5 +1,5 @@
 import numpy as np
-
+from bilby.gw.utils import noise_weighted_inner_product
 from typing import List, Self, Tuple
 
 from math import log10
@@ -23,13 +23,6 @@ def _get_highest_error(error_list, basis_indices):
             idx = rank_errors.index(err)
             rank = rank_id
     return rank, idx, np.float64(err.real)
-
-
-def _dot_product(weights, a, b):
-
-    assert len(a) == len(b)
-    return np.vdot(a * weights, b)
-
 
 class ReducedBasis(object):
     """Class for managing the creation of reduced basis sets."""
@@ -96,7 +89,7 @@ class ReducedBasis(object):
 
     @log.callable("Computing reduced basis")
     def compute(
-        self, model: RombusModelType, samples: Samples, tol: float = DEFAULT_TOLERANCE
+        self, model: RombusModelType, samples: Samples, tol: float = DEFAULT_TOLERANCE, psd = 1., product = None
     ) -> Self:
 
         """Compute a reduced basis for a given model and set of parameters.
@@ -109,17 +102,28 @@ class ReducedBasis(object):
             Set of parameter samples for the greedy algorithm to select from
         tol : float
             The absolute tolerance in the error for the greedy algorythm to use for sample selection
-
+        psd : array or float
+            Power spectral density used to weight inner product. Default is 1., resulting in the standard dot product.
+        product : function 
+            Defines the inner product to use throughout the reduced basis algorithm and training set construction.
         Returns
         -------
         Self
             Returns a reference to self, so that method calls can be chained.
         """
-
+        
         self.model: RombusModel = RombusModel.load(model)
 
+        self.psd = psd
+
+        if product is None:
+            raise ValueError("Must pass an inner product function to the Reduced Basis compute method.\
+                            The default product is defined in the rom.py file.")
+        else:
+            self.product = product
+        
         # construct training set by evaluating model at samples
-        my_ts: np.ndarray = self.model.generate_model_set(samples)
+        my_ts: np.ndarray = self.model.generate_model_set(samples, product=self.product, weights=self.psd)
         print("\n Worker {} has {} samples.".format(mpi.RANK, len(my_ts)))
 
         with log.progress(
@@ -159,7 +163,7 @@ class ReducedBasis(object):
                 progress.update(log10_error)
                 iter += 1
                 flag_first_iteration = False
-        
+
         all_samples = mpi.COMM.gather(samples.samples, root=mpi.MAIN_RANK)
 
         if mpi.RANK_IS_MAIN:
@@ -204,13 +208,13 @@ class ReducedBasis(object):
         pc_matrix: List[np.ndarray],
         my_ts: np.ndarray,
         basis_indices: List[int],
-        iter: int,
+        iter: int
     ) -> Tuple[List[np.ndarray], List[np.ndarray], Tuple[int, int, int]]:
         # project training set on basis + get errors
         
-        pc = self._project_onto_basis(1.0, my_ts, iter - 1)
+        pc = self._project_onto_basis(my_ts, iter - 1)
         pc_matrix.append(pc)
-        
+
         projection_errors = list(
             1
             - np.einsum(
@@ -257,7 +261,7 @@ class ReducedBasis(object):
 
     def _IMGS(self, next_vec, iter):
         ortho_condition = 0.5
-        norm_prev = np.sqrt(np.vdot(next_vec, next_vec))
+        norm_prev = np.sqrt(self.product(self.psd, next_vec, next_vec)) #np.sqrt(np.vdot(next_vec, next_vec))
         flag = False
         while not flag:
             next_vec, norm_current = self._MGS(next_vec, iter)
@@ -266,7 +270,7 @@ class ReducedBasis(object):
                 norm_prev = norm_current
             else:
                 flag = True
-            norm_current = np.sqrt(np.vdot(next_vec, next_vec))
+            norm_current = np.sqrt(self.product(self.psd,next_vec,next_vec)) #np.sqrt(np.vdot(next_vec, next_vec))
             next_vec /= norm_current
         return next_vec
 
@@ -274,17 +278,17 @@ class ReducedBasis(object):
         dim_RB = iter
         for i in range(dim_RB):
             # --- ortho_basis = ortho_basis - L2_proj*basis; ---
-            L2 = np.vdot(self.matrix[i], next_vec)
+            L2 = self.product(self.psd,self.matrix[i],next_vec) #np.vdot(self.matrix[i], next_vec)
             next_vec -= self.matrix[i] * L2
-        norm = np.sqrt(np.vdot(next_vec, next_vec))
+        norm = np.sqrt(self.product(self.psd,next_vec,next_vec)) #np.sqrt(np.vdot(next_vec, next_vec))
         next_vec /= norm
         return next_vec, norm
 
-    def _project_onto_basis(self, integration_weights, my_ts, iter):
+    def _project_onto_basis(self, my_ts, iter):
 
         pc = np.zeros(len(my_ts), dtype=self.model.ordinate.dtype)
         for j in range(len(my_ts)):
-            pc[j] = _dot_product(integration_weights, self.matrix[iter], my_ts[j])
+            pc[j] = self.product(self.psd, self.matrix[iter], my_ts[j])
         return pc
 
     def _convert_to_basis_index(self, rank_number, rank_idx, rank_count):

@@ -21,6 +21,12 @@ DEFAULT_TOLERANCE: float = 1e-14
 DEFAULT_REFINE_N_RANDOM: int = 100
 
 
+def weighted_product(weights, a, b):
+    if b.ndim > 1 or a.ndim > 1: #sometimes want dot(h, B matrix), not just dot(h^*, g).
+        return np.dot(a / weights, b)
+    else:
+        return np.vdot(a / weights, b)
+
 class ReducedOrderModel(object):
     """Class for managing the creation, updating and subsequent use of a Reduced Order Model (ROM)."""
 
@@ -32,6 +38,8 @@ class ReducedOrderModel(object):
         empirical_interpolant: Optional[EmpiricalInterpolant] = None,
         basename: Optional[str] = None,
         tol: float = DEFAULT_TOLERANCE,
+        psd = 1.,
+        product = None
     ):
 
         self.model: RombusModel = RombusModel.load(model)
@@ -53,6 +61,14 @@ class ReducedOrderModel(object):
 
         self.tol = tol 
         """User defined error tolerance for the RB greedy algorithm"""
+
+        self.psd = psd 
+        """Power spectral density used for noise-weighted inner products. Default is 1., i.e. unweighted inner product."""
+
+        if product is None:
+            product = weighted_product
+        self.product = product
+        """Defines the inner product used to build the Reduced Basis, Training set, and Empirical Interpolant."""
 
     @classmethod
     @log.callable("Instantiating ROM from file")
@@ -114,7 +130,7 @@ class ReducedOrderModel(object):
         if do_step is None or do_step == "RB":
             try:
                 self.reduced_basis = ReducedBasis().compute(
-                    self.model, self.samples, tol=tol
+                    self.model, self.samples, tol=tol, psd=self.psd, product=self.product
                 )
             except exceptions.RombusException as e:
                 e.handle_exception()
@@ -148,6 +164,10 @@ class ReducedOrderModel(object):
                 "An attempt has been made to evaluate a ROM whose EmpiricalInterpolant has not been computed.  Compute the EmpiricalInterpolant and try again."
             )
         _signal_at_nodes = self.model.compute(params, self.empirical_interpolant.nodes)
+        mask = np.in1d(self.model.domain, self.empirical_interpolant.nodes)
+        #self.product(self.psd[mask], _signal_at_nodes, self.empirical_interpolant.B_matrix)
+
+        #This may need to be noise-weighted. Will have to check after passing product to EI.
         return np.dot(_signal_at_nodes, self.empirical_interpolant.B_matrix) #Used to be np.real(b_matrix), but this is wrong.
 
     @log.callable("Refining ROM")
@@ -176,7 +196,7 @@ class ReducedOrderModel(object):
 
         if self.reduced_basis is None:
             self.reduced_basis = ReducedBasis().compute(
-                self.model, Samples(self.model, n_random=n_random), tol=tol
+                self.model, Samples(self.model, n_random=n_random), tol=tol, psd=self.psd, product=self.product
             )
         self._validate_and_refine_basis(n_random, tol=tol, iterate=iterate)
 
@@ -245,7 +265,7 @@ class ReducedOrderModel(object):
         """
         if not self.reduced_basis:
             self.reduced_basis = ReducedBasis().compute(
-                self.model, self.samples, tol=tol
+                self.model, self.samples, tol=tol, psd=self.psd, product=self.product
             )
 
         if self.reduced_basis is None:
@@ -260,7 +280,7 @@ class ReducedOrderModel(object):
             while True:
                 # generate validation set by randomly sampling the parameter space
                 new_samples = Samples(self.model, n_random=n_random)
-                my_vs = self.model.generate_model_set(new_samples)
+                my_vs = self.model.generate_model_set(new_samples, self.product, self.psd)
 
                 # test validation set
                 RB_transpose = np.transpose(self.reduced_basis.matrix)
@@ -270,11 +290,11 @@ class ReducedOrderModel(object):
                         proj_error = 1 - np.sum(
                             [
                                 np.real(np.conjugate(d_i) * d_i)
-                                for d_i in np.dot(my_vs[i], RB_transpose)
+                                for d_i in self.product(self.psd, my_vs[i], RB_transpose)
                             ]
                         )
                     else:
-                        proj_error = 1 - np.sum(np.dot(my_vs[i], RB_transpose) ** 2)
+                        proj_error = 1 - np.sum(self.product(self.psd, my_vs[i], RB_transpose) ** 2)
                     if proj_error > tol:
                         selected_greedy_points.append(validation_sample)
                 n_selected_greedy_points_global = mpi.COMM.allreduce(
@@ -288,7 +308,7 @@ class ReducedOrderModel(object):
                 # points and remake the basis
                 self.samples.extend(selected_greedy_points)
                 self.reduced_basis = ReducedBasis().compute(
-                    self.model, self.samples, tol=tol
+                    self.model, self.samples, tol=tol, psd=self.psd, product=self.product
                 )
                 n_greedy_new = len(self.reduced_basis.greedypoints)
                 n_greedy_new_global = mpi.COMM.allreduce(
